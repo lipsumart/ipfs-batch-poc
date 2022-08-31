@@ -1,6 +1,7 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 import Image from "next/image";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, forwardRef, useRef, useImperativeHandle } from "react";
 
 import "bootstrap/dist/css/bootstrap.min.css";
 
@@ -13,6 +14,7 @@ import Nav from "react-bootstrap/Nav";
 import Navbar from "react-bootstrap/Navbar";
 import InputGroup from "react-bootstrap/InputGroup";
 import Modal from "react-bootstrap/Modal";
+import CloseButton from "react-bootstrap/CloseButton";
 
 import useSWR from "swr";
 
@@ -20,74 +22,15 @@ import { request } from "graphql-request";
 
 import { validateAddress } from "@taquito/utils";
 
-export default function Home() {
-  const [batch, setBatch] = useState([]);
+
+export default function Home(){
+  const [batch, setBatch] = useState([]); // [{index, count}]
   const [target, setTarget] = useState("");
-  const [batchCount, setBatchCount] = useState(0);
   const [cartModalStatus, setCartModalStatus] = useState(false);
-
-  const handleItemCount = () => {
-    let count = 0;
-
-    for (let i = 0; i < batch.length; i++)
-      count += batch[i][1];
-
-    setBatchCount(count);
-  }
-
-  const onCartClick = () => {
-    setCartModalStatus(true);
-  }
-
-  const onHideModal = () => {
-    setCartModalStatus(false);
-  }
-
-  const onSubmit = (e) => {
-    console.log(e);
-    setTarget(e.target[0].value);
-    e.preventDefault();
-  };
-
-  const onChange = (el, quantity) => {
-    let batchCopy = batch;
-    let found = false;
-    let foundIndex;
-
-    for (var i = 0; i < batchCopy.length; i++)
-      if (batchCopy[i][0] === el)
-      {
-        found = true;
-        foundIndex = i;
-      }       
-
-    if (!found && quantity > 0) batchCopy.push([el, quantity]);
-    else if (found && quantity > 0) batchCopy[foundIndex][1] = quantity;
-    else if (found && quantity === 0)
-      if (foundIndex === 0) batchCopy.shift()
-      else if (foundIndex === batchCopy.length -1) batchCopy.pop()
-      else batchCopy.splice(foundIndex, 1)
-    
-    setBatch(batchCopy);
-    handleItemCount();
-    console.log(batch);
-    console.log(batchCount);
-  };
-
-  return (
-    <Container>
-      <TopBar onSubmit={onSubmit} cartTotal={batchCount} onCartClick={onCartClick}/>
-      <CartModal show={cartModalStatus} onHideModal={onHideModal}/>
-      <DataMap target={target} onChange={onChange}/>
-    </Container>
-  )
-}
-
-export function DataMap(props){
   const fetcher = query => request("https://data.objkt.com/v2/graphql", query);
   const { data, error } = useSWR(
   `{
-    listing(where: {token: {creators: {creator_address: {_eq: ` + props.target + `}}, supply: {_gt: "0"}}, status: {_eq: "active"}}, order_by: {token: {timestamp: asc}, price: asc}) {
+    listing(where: {token: {creators: {creator_address: {_eq: ` + target + `}}, supply: {_gt: "0"}}, status: {_eq: "active"}}, order_by: {token: {timestamp: asc}, price: asc}) {
       token {
         name
         display_uri
@@ -103,63 +46,132 @@ export function DataMap(props){
     }
   }`, fetcher);
 
-  const onChange = (el, quantity) => {
-    console.dir(el);
-    props.onChange(el, quantity);
+  const onCartClick = () => {
+    setCartModalStatus(true);
+  }
+
+  const onHideModal = () => {
+    setCartModalStatus(false);
+  }
+
+  const onSubmit = (e) => {
+    console.log(e);
+    setTarget(e.target[0].value);
+    e.preventDefault();
   };
 
-  if (props.target === "") return <div>No target.</div>;
-  if (props.target !== "" && validateAddress(props.target) !== 3) return <div>Invalid address.</div>;
+  const batchCount = batch.reduce((sum, item) => sum + item.count, 0);
+
+  const onChange = (index, count) => {
+    if (count === 0) {
+      setBatch(batch.filter((b) => b.index !== index));
+    } else {
+      const found = batch.find((b) => b.index === index);
+      if (found) {
+        setBatch(batch.map((b) => (b.index === index ? { index, count } : b)));
+      } else {
+        setBatch([...batch, { index, count }]);
+      }
+    }
+  };
+
+  return (
+    <Container>
+      <TopBar cartTotal={batchCount} onSubmit={onSubmit} onCartClick={onCartClick}/>
+      <DataMap data={data} batch={batch} onChange={onChange} target={target} error={error}/>
+      <CartModal data={data} batch={batch} onChange={onChange} onHideModal={onHideModal} show={cartModalStatus}/>
+    </Container>
+  );
+};
+
+export const DataMap = ({ data, batch, onChange, target, error }) => {
+  if (target === "") return <div>No target.</div>;
+  if (target !== "" && validateAddress(target) !== 3) return <div>Invalid address.</div>;
   if (error) {
     console.log(error);
     return <div>Failed to Load</div>;
   }
   if (!data) return <div>Loading...</div>;
   if (!error && data){
-
-    return <Row>
-    {data["listing"]
-    .map((el, i , arr) => {
-      return (
-      <Col key={i} id={i} xs={4} sm={4} md={3} lg={2}>
-          <StateImg src={"https://ipfs.io/ipfs/" + el["token"]["display_uri"].slice(7,)}/>
-          <h5>{el["token"]["name"]}</h5>
-          <p>{el["price"] / 1000000}</p>
-          <Row>
-            <QuantityForm remaining={el["amount_left"]} onChange={onChange} element={el}/>
-          </Row>
-      </Col>)      
-    })}
-    </Row>
+    return (
+      <Row>
+        {data.listing.map(({ token: { name, display_uri }, price, amount_left }, index) => (
+          <Col key={index} id={index} xs={4} sm={4} md={3} lg={2}>
+            <StateImg src={"https://ipfs.io/ipfs/" + display_uri.slice(7,)}/>
+            <h5>name: {name}</h5>
+            <p>price: {price / 1000000}</p>
+            <Row>
+              <QuantityForm
+              value={batch.find((b) => b.index === index)?.count || 0}
+              maxValue={amount_left}
+              onChange={(v) => onChange(index, v)}
+            />
+            </Row>
+          </Col>
+        ))}
+      </Row>
+    );
   }
-}
+};
 
-export function QuantityForm(props){
-  const [quantity, setQuantity] = useState(0);
-
-  useEffect(()=>{
-    props.onChange(props.element, quantity) 
-  }, [props, quantity]);
-
-  const onChange = (e) => {
-    setQuantity(parseInt(e.target.value));  
-    e.preventDefault();   
-  };
-
+export const QuantityForm = ({ value, maxValue, onChange }) => {
   return (
-    <Form.Group>
-      <Form.Label>Quantity</Form.Label>
-      <InputGroup>
-        <Form.Control onChange={onChange} onKeyDown={(e)=>{e.preventDefault();}} type={"number"} value={quantity} min={0} max={props.remaining} aria-describedby="basic-addon1"/>
-          <InputGroup.Text id="basic-addon1">
-            {"/" + props.remaining}
-          </InputGroup.Text>
-      </InputGroup>
-    </Form.Group>
+    <div style={{ display: "flex" }}>
+      {value} / {maxValue}
+      <button onClick={(e) => onChange(Math.min(value + 1, maxValue))}>
+        +
+      </button>
+      <button onClick={(e) => onChange(Math.max(value - 1, 0))}>-</button>
+    </div>
   );
+};
+
+export const CartModal = ({ data, batch, onChange, show, onHideModal })=>{
+  return (
+  <Modal show={show} onHide={onHideModal}>
+    <Container>
+      <Modal.Header closeButton>
+        <Modal.Title>Cart</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Row>
+        {
+          batch.map(({ index, count }) => (
+            <Col key={index}>              
+              <CloseButton onClick={(e) => onChange(index, 0)}/>
+              <h5>{data.listing[index].token.name}</h5>
+              <p>{data.listing[index].price / 1000000} {" xtz"}</p>
+              <p>{count}</p>
+            </Col>
+          ))
+        }
+        </Row>
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="secondary" onClick={onHideModal}>
+          Close
+        </Button>
+        <Button variant="primary" onClick={onHideModal}>
+          Save Changes
+        </Button>
+      </Modal.Footer>
+    </Container>
+  </Modal>);
 }
 
-export function TopBar(props){
+export const StateImg = ({ src })=>{
+  const [width, setWidth] = useState("100%");
+  const [height, setHeight] = useState("100%");
+  return <Image height={height} width={width} alt=""
+    src={src}
+    onLoadingComplete={(obj)=>{
+      setWidth(obj.naturalWidth);
+      setHeight(obj.naturalHeight);
+    }
+  }></Image>
+}
+
+export const TopBar = ({ cartTotal, onSubmit, onCartClick })=>{
 
   return (          
   <Navbar bg="light" expand="lg" sticky={"top"} fixed={"top"}>
@@ -167,7 +179,7 @@ export function TopBar(props){
     <Navbar.Toggle aria-controls="basic-navbar-nav" />
     <Navbar.Collapse id="basic-navbar-nav">
       <Nav className="me-auto">
-        <Form onSubmit={props.onSubmit}>
+        <Form onSubmit={onSubmit}>
           <Form.Group>
             <Form.Label>
               Target Tezos Address:
@@ -177,39 +189,7 @@ export function TopBar(props){
           <Button type={"submit"}>Submit</Button>
         </Form>      
       </Nav>
-      <Button onClick={props.onCartClick}>{"Cart: " + props.cartTotal}</Button>  
+      <Button onClick={onCartClick}>{"Cart: " + cartTotal}</Button>  
     </Navbar.Collapse>                  
   </Navbar>);
-}
-
-export function CartModal(props){
-  return (
-  <Modal show={props.show} onHide={props.onHideModal}>
-    <Modal.Header closeButton>
-      <Modal.Title>Cart</Modal.Title>
-    </Modal.Header>
-    <Modal.Body>Woohoo, you're reading this text in a modal!
-          
-    </Modal.Body>
-    <Modal.Footer>
-      <Button variant="secondary" onClick={props.onHideModal}>
-        Close
-      </Button>
-      <Button variant="primary" onClick={props.onHideModal}>
-        Save Changes
-      </Button>
-    </Modal.Footer>
-  </Modal>);
-}
-
-export function StateImg(props){
-  const [width, setWidth] = useState("100%");
-  const [height, setHeight] = useState("100%");
-  return <Image height={height} width={width} alt=""
-    src={props.src}
-    onLoadingComplete={(obj)=>{
-      setWidth(obj.naturalWidth);
-      setHeight(obj.naturalHeight);
-    }
-  }></Image>
 }
