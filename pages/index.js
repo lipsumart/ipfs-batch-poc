@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 import Image from "next/image";
 
-import { useState, useEffect, forwardRef, useRef, useImperativeHandle } from "react";
+import { useState, useEffect } from "react";
 
 import "bootstrap/dist/css/bootstrap.min.css";
 
@@ -12,7 +12,6 @@ import Col from "react-bootstrap/Col";
 import Form from "react-bootstrap/Form";
 import Nav from "react-bootstrap/Nav";
 import Navbar from "react-bootstrap/Navbar";
-import InputGroup from "react-bootstrap/InputGroup";
 import Modal from "react-bootstrap/Modal";
 import CloseButton from "react-bootstrap/CloseButton";
 
@@ -22,10 +21,10 @@ import { request } from "graphql-request";
 
 import { validateAddress } from "@taquito/utils";
 
-
 export default function Home(){
   const [batch, setBatch] = useState([]); // [{index, count}]
   const [target, setTarget] = useState("");
+  const [cart, setCart] = useState([]);
   const [cartModalStatus, setCartModalStatus] = useState(false);
   const fetcher = query => request("https://data.objkt.com/v2/graphql", query);
   const { data, error } = useSWR(
@@ -54,23 +53,32 @@ export default function Home(){
     setCartModalStatus(false);
   }
 
+  useEffect(()=>{
+    setBatch(cart.filter((b) => target === b.tgt));
+
+  }, [target]);
+
   const onSubmit = (e) => {
     console.log(e);
     setTarget(e.target[0].value);
+    
     e.preventDefault();
   };
 
   const batchCount = batch.reduce((sum, item) => sum + item.count, 0);
 
-  const onChange = (index, count) => {
+  const onChange = (index, count, token, tgt) => {
     if (count === 0) {
-      setBatch(batch.filter((b) => b.index !== index));
+      setBatch(batch.filter((b) => b.index !== index)); // remove from batch
+      setCart(cart.filter((b) => b.token !== token)); // remove from cart if same element
     } else {
       const found = batch.find((b) => b.index === index);
       if (found) {
-        setBatch(batch.map((b) => (b.index === index ? { index, count } : b)));
+        setBatch(batch.map((b) => (b.index === index ? { index, count, token, tgt } : b)));
+        setCart(cart.map((b) => (b.token === token ? { index, count, token, tgt }: b)));
       } else {
-        setBatch([...batch, { index, count }]);
+        setBatch([...batch, { index, count, token, tgt }]);
+        setCart([...cart, { index, count, token, tgt }])
       }
     }
   };
@@ -79,7 +87,7 @@ export default function Home(){
     <Container>
       <TopBar cartTotal={batchCount} onSubmit={onSubmit} onCartClick={onCartClick}/>
       <DataMap data={data} batch={batch} onChange={onChange} target={target} error={error}/>
-      <CartModal data={data} batch={batch} onChange={onChange} onHideModal={onHideModal} show={cartModalStatus}/>
+      <CartModal data={data} batch={batch} onChange={onChange} show={cartModalStatus} onHideModal={onHideModal} cart={cart}/>
     </Container>
   );
 };
@@ -95,16 +103,16 @@ export const DataMap = ({ data, batch, onChange, target, error }) => {
   if (!error && data){
     return (
       <Row>
-        {data.listing.map(({ token: { name, display_uri }, price, amount_left }, index) => (
+        {data.listing.map(({ token: { name, display_uri }, price, amount_left }, index, arr) => (
           <Col key={index} id={index} xs={4} sm={4} md={3} lg={2}>
-            <StateImg src={"https://ipfs.io/ipfs/" + display_uri.slice(7,)}/>
+            {display_uri ? <StateImg src={"https://ipfs.io/ipfs/" + display_uri.slice(7,)}/>: null}
             <h5>name: {name}</h5>
             <p>price: {price / 1000000}</p>
             <Row>
               <QuantityForm
               value={batch.find((b) => b.index === index)?.count || 0}
               maxValue={amount_left}
-              onChange={(v) => onChange(index, v)}
+              onChange={(v) => onChange(index, v, arr[index], target)}
             />
             </Row>
           </Col>
@@ -126,7 +134,7 @@ export const QuantityForm = ({ value, maxValue, onChange }) => {
   );
 };
 
-export const CartModal = ({ data, batch, onChange, show, onHideModal })=>{
+export const CartModal = ({ data, batch, onChange, show, onHideModal, cart })=>{
   return (
   <Modal show={show} onHide={onHideModal}>
     <Container>
@@ -136,11 +144,11 @@ export const CartModal = ({ data, batch, onChange, show, onHideModal })=>{
       <Modal.Body>
         <Row>
         {
-          batch.map(({ index, count }) => (
+          cart.map(({ index, count, token, target }) => (
             <Col key={index}>              
-              <CloseButton onClick={(e) => onChange(index, 0)}/>
-              <h5>{data.listing[index].token.name}</h5>
-              <p>{data.listing[index].price / 1000000} {" xtz"}</p>
+              <CloseButton onClick={(e) => onChange(index, 0, token, target)}/>
+              <h5>{token.name}</h5>
+              <p>{token.price / 1000000} {" xtz"}</p>
               <p>{count}</p>
             </Col>
           ))
@@ -172,7 +180,6 @@ export const StateImg = ({ src })=>{
 }
 
 export const TopBar = ({ cartTotal, onSubmit, onCartClick })=>{
-
   return (          
   <Navbar bg="light" expand="lg" sticky={"top"} fixed={"top"}>
     <Navbar.Brand href="#home">Tezos Batch Collector v0.1</Navbar.Brand>
